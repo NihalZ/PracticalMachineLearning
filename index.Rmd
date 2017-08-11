@@ -1,30 +1,117 @@
 ---
-title: "Practical Machine Learning Course Project"
+title: "Pedicting Excercice Performance"
 author: "Nehal El-Zayat"
 date: "9 August 2017"
 output: html_document
 ---
+# Introduction
+The purpose of this project is to predict the level of performance of certain excercices from data collected from wearable devices during physical training.
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+#Loading and Exploring Data
+In this section, we load the libraried needed throughout the analysis and the training and the testing data sets. We also explore the data in the training set, to get a better perspective on the nature of the data and which variables would be beneficial for the prediction model.
+
+```{r}
+library(caret)
+library(parallel)
+library(doParallel)
+library(randomForest)
+
+training<- read.csv("pml-training.csv")
+testing<- read.csv("pml-testing.csv")
 ```
 
-## R Markdown
+```{r,eval=FALSE}
+summary(training)
+``` 
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+```{r}
+head(training)
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+table(training$classe)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+# Cleaning Data
+The data collected should be first cleaned and prepared in order to create an effective prediction model.
+
+First, we removed the columns that represents feature about the person who applied the exercice, like his ID or name. The purpose of this move is to make the prediction unbias to the user. 
+
+Second, it was observed from data exploration that many columns have NA values.
+The following code calculates the percentage of NAs in columns and eliminates the columns with high NAs values since they don't have an impact on the prediction model.
+
+```{r, eval=FALSE}
+index<- vector()
+j<- 1
+for (i in 8:160){
+  if(sum(is.na(training[,i]))/19622 < 0.2){
+    index[j]<- i
+      j<- j+1
+  }
+  
+}
+train_set<- training[, index]
+
+```
+
+
+After removing the columns with high NAs percentage, the next step is to remove the columns that have near zero variance, because, as NA case, they won't have an impact on the prediction model since the value is approximity unique throughout the whole data set.
+```{r,eval=FALSE}
+nsv<- nearZeroVar(training,saveMetrics = TRUE)
+temp_col<- nsv[which(nsv$nzv == FALSE),]
+names<- rownames(temp_col)
+
+final_predictor<- train_set[,which(colnames(train_set) %in% names)]
+```
+
+
+
+To make the test data compatible with the model, we apply the same operations on the test set, using the features of the training data.(Removing the same exact columns)
+```{r,eval=FALSE}
+test_set<- testing[,index]
+final_test<- test_set[,which(colnames(test_set)%in% names)]
+```
+
+# Prediction Model and Cross-Validation
+Using the traincontrol() method, we set the cross-validation settings for the training data. We set the number to be equal to 4, not larger since we are limited in the computation capacity.
+```{r,eval=FALSE}
+fitcontrol <- trainControl(method = "cv",
+                                       number = 4,
+                                       allowParallel = TRUE)
+```
+
+
+We select the Random Forest Algorithm to create the prediction model.
+However, before creating the model, given the computation limitations, we have to make R work in multithread instead of single thread to be able to get the resulting model in a reasonable timing.
+
+```{r,eval=FALSE}
+cluster<- makeCluster(detectCores()-1)
+registerDoParallel(cluster)
+```
+
+```{r, eval=FALSE}
+modal<- train(classe~., data=final_predictor, method="rf",trContorl = fitcontrol)
+
+#closing the cluster
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+#Results
+
+After developing the model, we test it first on the training set.
+```{r}
+predict_train<- predict(modal, final_predictor)
+confusionMatrix(final_predictor$classe, predict(modal, final_predictor))
+plot(final_predictor$classe, predict_train, main= "Real Vs Predicted Values", xlab= "Real Classes", ylab= "Predicted Classes")
+```
+
+From the plot we can see that the prediction has a 100% accuracy on the training set.
+
+Now we implement the model on the test set.
+```{r}
+results<- predict(modal, final_test)
+```
+
